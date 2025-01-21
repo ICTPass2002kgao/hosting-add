@@ -19,6 +19,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 pymysql.install_as_MySQLdb()
 
 
+CSRF_TRUSTED_ORIGINS = ['https://hosting-add-production.up.railway.app/']
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/4.2/howto/deployment/checklist/
 
@@ -30,7 +31,6 @@ DEBUG = False
 
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'certificatesaqa.org.za', 'www.certificatesaqa.org.za','hosting-add-production.up.railway.app' ,]
 
-CSRF_TRUSTED_ORIGINS = ['https://hosting-add-production.up.railway.app/']
 
 
 # Application definition
