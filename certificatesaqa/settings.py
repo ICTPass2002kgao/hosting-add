@@ -14,6 +14,8 @@ import os
 import base64 
 from pathlib import Path
 import pymysql 
+import binascii
+
 import dj_database_url
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -151,7 +153,12 @@ MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
 
 encoded_key = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
 if encoded_key:
-    key_json = base64.b64decode(encoded_key).decode('utf-8')
-    with open('service_account.json', 'w') as f:
-        f.write(key_json)
-    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'service_account.json'
+    try: 
+        key_json = base64.b64decode(encoded_key + '===').decode('utf-8')
+        with open('service_account.json', 'w') as f:
+            f.write(key_json)
+        os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'service_account.json'
+    except (binascii.Error, UnicodeDecodeError) as e:
+        raise ValueError("Failed to decode GOOGLE_APPLICATION_CREDENTIALS_JSON. Check your environment variable.") from e
+else:
+    raise ValueError("GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable is not set.")
