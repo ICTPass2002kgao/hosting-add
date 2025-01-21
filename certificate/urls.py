@@ -9,7 +9,7 @@ urlpatterns = [ # Use `str` for name
     path('logout/', auth_views.LogoutView.as_view(next_page='login'), name='logout'), 
     path('upload/', views.upload_certificate, name='upload_certificate'),
     path('<str:certificate_name>/', views.view_certificate, name='view_certificate'),
-    path('', auth_views.LoginView.as_view(template_name='index.html'), name='login'),
+    path('',  views.superuser_login, name='login'),
     
 ]
 

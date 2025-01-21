@@ -21,8 +21,37 @@ from django.views.decorators.csrf import csrf_exempt
 import logging
 
 logger = logging.getLogger(__name__)
+from django.contrib.auth import authenticate, login
+from django.http import JsonResponse
+from django.views.decorators.csrf import csrf_exempt
+import json
 
 @csrf_exempt
+def superuser_login(request):
+    if request.method == "POST":
+        try: 
+            data = json.loads(request.body)
+            username = data.get("username")
+            password = data.get("password")
+ 
+            user = authenticate(username=username, password=password)
+
+            if user is not None:
+                if user.is_superuser:  
+                    login(request, user)
+                    return JsonResponse({"message": "Login successful", "username": username}, status=200)
+                else:
+                    return JsonResponse({"error": "Access denied. Only superusers can log in."}, status=403)
+            else:
+                return JsonResponse({"error": "Invalid username or password."}, status=401)
+
+        except json.JSONDecodeError:
+            return JsonResponse({"error": "Invalid JSON data."}, status=400)
+
+    return JsonResponse({"error": "Only POST requests are allowed."}, status=405)
+
+@csrf_exempt
+@login_required
 def upload_certificate(request):
     if request.method == 'POST':
         form = CertificateUploadForm(request.POST, request.FILES)
