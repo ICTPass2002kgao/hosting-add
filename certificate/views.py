@@ -48,7 +48,7 @@ def superuser_login(request):
         except json.JSONDecodeError:
             return JsonResponse({"error": "Invalid JSON data."}, status=400)
 
-    return JsonResponse({"error": "Only POST requests are allowed."}, status=405)
+    return render(request,'index.html')
 
 @csrf_exempt
 @login_required
