@@ -18,6 +18,9 @@ import uuid
 from io import BytesIO
 from django.views.decorators.csrf import csrf_exempt 
 from django.contrib.auth import authenticate, login  
+
+from django.contrib.auth import logout
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -36,6 +39,11 @@ def superuser_login(request):
         return render(request, "index.html", {"error": "Invalid credentials or not authorized."})
 
     return render(request, "index.html") 
+
+@csrf_exempt
+def user_logout(request):
+    logout(request)
+    return redirect("login")
 @csrf_exempt
 @login_required
 def upload_certificate(request):
