@@ -30,6 +30,7 @@ DEBUG = True
 
 ALLOWED_HOSTS = ['127.0.0.1', 'localhost', 'certificatesaqa.org.za', 'www.certificatesaqa.org.za','hosting-add-production.up.railway.app' ,]
 
+CSRF_TRUSTED_ORIGINS = ['https://hosting-add-production.up.railway.app/']
 
 
 # Application definition
