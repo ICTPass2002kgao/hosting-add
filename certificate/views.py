@@ -16,15 +16,16 @@ from django.urls import reverse
 from google.cloud import storage
 import uuid
 from io import BytesIO
+from django.views.decorators.csrf import csrf_exempt
 
+@csrf_exempt
 def upload_certificate(request):
     if request.method == 'POST':
         form = CertificateUploadForm(request.POST, request.FILES)
         if form.is_valid():
             certificate = form.save(commit=False)
-            
-            # Generate a name for the certificate (using UUID)
-            certificate.name = str(uuid.uuid4())  # This is the unique name
+             
+            certificate.name = str(uuid.uuid4())  
 
             uploaded_file = request.FILES['document']
             ext = uploaded_file.name.split('.')[-1]
@@ -36,9 +37,7 @@ def upload_certificate(request):
             blob = bucket.blob(new_filename)
             blob.upload_from_file(uploaded_file)
 
-            certificate.document = blob.public_url
-
-            # Generate the QR code with the name
+            certificate.document = blob.public_url 
             link = request.build_absolute_uri(reverse('view_certificate', args=[certificate.name]))
             qr = qrcode.make(link)
             qr_io = BytesIO()
@@ -69,8 +68,7 @@ def upload_certificate(request):
     certificates = Certificate.objects.all()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
 
-def create_pdf_with_qrcode(pdf_path, qr_image_path, new_pdf_path):
-    # Generate a new temporary in-memory PDF with QR code overlay
+def create_pdf_with_qrcode(pdf_path, qr_image_path, new_pdf_path): 
     packet = BytesIO()
     c = canvas.Canvas(packet, pagesize=letter)
 
@@ -85,16 +83,14 @@ def create_pdf_with_qrcode(pdf_path, qr_image_path, new_pdf_path):
 
     packet.seek(0)
     new_pdf = PdfReader(packet)
-
-    # Now we merge the existing PDF (from GCS) with the new QR code
+ 
     client = storage.Client()
     bucket = client.get_bucket(settings.GS_BUCKET_NAME)
+ 
+    blob = bucket.blob(pdf_path.split('/')[-1])   
+    pdf_bytes = blob.download_as_bytes() 
 
-    # The uploaded PDF is already available via the URL, so we use the URL directly here
-    blob = bucket.blob(pdf_path.split('/')[-1])  # Extract file name from the URL
-    pdf_bytes = blob.download_as_bytes()  # Download file as bytes
-
-    # Wrap the bytes in a BytesIO object to make it file-like
+    
     existing_pdf_file = BytesIO(pdf_bytes)
     existing_pdf = PdfReader(existing_pdf_file)
 
