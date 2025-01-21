@@ -146,22 +146,16 @@ GS_PROJECT_ID = 'certificate-442017'
 # Set the media URL for accessing files
 MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
 
-import base64 
-import json
- 
-encoded_key = os.getenv("GOOGLE_APPLICATION_CREDENTIALS_JSON")
+import base64
 
-if encoded_key:
-    try:
-        # Decode and load the JSON content
-        key_json = json.loads(base64.b64decode(encoded_key + "===").decode("utf-8"))
-        
-        # Write to a file or set GOOGLE_APPLICATION_CREDENTIALS
-        with open('service_account.json', 'w') as f:
-            json.dump(key_json, f)
-        
-        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = "service_account.json"
-    except Exception as e:
-        raise ValueError(f"Error decoding service account key: {e}")
-else:
-    raise ValueError("GOOGLE_APPLICATION_CREDENTIALS_JSON environment variable is missing.")
+encoded_key = os.getenv('GOOGLE_CREDENTIALS')  
+if not encoded_key:
+    raise ValueError("GOOGLE_CREDENTIALS environment variable not set")
+
+key_json = base64.b64decode(encoded_key).decode('utf-8')
+ 
+service_account_path = 'service_account.json'
+with open(service_account_path, 'w') as f:
+    f.write(key_json)
+ 
+os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = service_account_path
