@@ -18,6 +18,10 @@ import uuid
 from io import BytesIO
 from django.views.decorators.csrf import csrf_exempt
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 @csrf_exempt
 def upload_certificate(request):
     if request.method == 'POST':

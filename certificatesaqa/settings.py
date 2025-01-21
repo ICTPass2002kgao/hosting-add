@@ -11,6 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
 
+import base64 
 from pathlib import Path
 import pymysql 
 import dj_database_url
@@ -147,5 +148,10 @@ GS_PROJECT_ID = 'certificate-442017'
 
 # Set the media URL for accessing files
 MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
- 
-os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+
+encoded_key = os.getenv('GOOGLE_APPLICATION_CREDENTIALS_JSON')
+if encoded_key:
+    key_json = base64.b64decode(encoded_key).decode('utf-8')
+    with open('service_account.json', 'w') as f:
+        f.write(key_json)
+    os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = 'service_account.json'
