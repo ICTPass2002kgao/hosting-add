@@ -1,0 +1,1 @@
+web gunicorn certificatesaqa.wsgi:application --log-file -
