@@ -1,4 +1,4 @@
-from django.shortcuts import render, get_object_or_404
+from django.shortcuts import render, get_object_or_404,redirect
 from django.http import HttpResponse
 from django.urls import reverse
 from .models import Certificate
@@ -16,40 +16,26 @@ from django.urls import reverse
 from google.cloud import storage
 import uuid
 from io import BytesIO
-from django.views.decorators.csrf import csrf_exempt
-
+from django.views.decorators.csrf import csrf_exempt 
+from django.contrib.auth import authenticate, login  
 import logging
 
 logger = logging.getLogger(__name__)
-from django.contrib.auth import authenticate, login
-from django.http import JsonResponse
-from django.views.decorators.csrf import csrf_exempt
-import json
 
 @csrf_exempt
 def superuser_login(request):
     if request.method == "POST":
-        try: 
-            data = json.loads(request.body)
-            username = data.get("username")
-            password = data.get("password")
- 
-            user = authenticate(username=username, password=password)
+        username = request.POST.get("username")
+        password = request.POST.get("password")
 
-            if user is not None:
-                if user.is_superuser:  
-                    login(request, user)
-                    return JsonResponse({"message": "Login successful", "username": username}, status=200)
-                else:
-                    return JsonResponse({"error": "Access denied. Only superusers can log in."}, status=403)
-            else:
-                return JsonResponse({"error": "Invalid username or password."}, status=401)
+        user = authenticate(username=username, password=password)
 
-        except json.JSONDecodeError:
-            return JsonResponse({"error": "Invalid JSON data."}, status=400)
+        if user is not None and user.is_superuser:  
+            login(request, user)  
+            return redirect("upload_certificate") 
+        return render(request, "index.html", {"error": "Invalid credentials or not authorized."})
 
-    return render(request,'index.html')
-
+    return render(request, "index.html") 
 @csrf_exempt
 @login_required
 def upload_certificate(request):
