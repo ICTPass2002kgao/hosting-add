@@ -7,8 +7,9 @@ from django.conf.urls.static import static
  
 urlpatterns = [ # Use `str` for name
     path('logout/',  views.user_logout, name='logout'), 
-    path('', views.upload_certificate, name='upload_certificate'),
-    path('<str:certificate_name>/', views.view_certificate, name='view_certificate'), 
+    path('upload/', views.upload_certificate, name='upload_certificate'),
+    path('<str:certificate_name>/', views.view_certificate, name='view_certificate'),
+    path('',  views.superuser_login, name='login'),
     
 ]
 
