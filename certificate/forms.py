@@ -1,7 +1,6 @@
 from django import forms
-from .models import Certificate
 
-class CertificateUploadForm(forms.ModelForm):
-    class Meta:
-        model = Certificate
-        fields = [ 'document']
+class CertificateUploadForm(forms.Form):
+    # We only need the file input; metadata is generated in the view
+    document = forms.FileField(label="Upload Certificate")
+    

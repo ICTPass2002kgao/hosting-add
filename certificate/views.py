@@ -1,162 +1,200 @@
-from django.shortcuts import render, get_object_or_404,redirect
-from django.http import HttpResponse
+from django.shortcuts import render, redirect
+from django.http import HttpResponse, Http404
 from django.urls import reverse
-from .models import Certificate
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth import authenticate, login, logout
+from django.views.decorators.csrf import csrf_exempt
+from django.core.files.base import ContentFile
+from django.conf import settings
+
+# Import Firebase instances
+from .firebase_config import db, bucket 
 from .forms import CertificateUploadForm
-from django.contrib.auth.decorators import login_required 
-from django.conf import settings 
+
 import uuid
 import qrcode
+from firebase_admin import firestore
+import datetime
 from io import BytesIO
 from PyPDF2 import PdfReader, PdfWriter
 from reportlab.pdfgen import canvas
-from reportlab.lib.pagesizes import letter  
-from django.core.files.base import ContentFile
-from django.urls import reverse 
-from google.cloud import storage
-import uuid
-from io import BytesIO
-from django.views.decorators.csrf import csrf_exempt 
-from django.contrib.auth import authenticate, login  
+from reportlab.lib.pagesizes import letter
 
-from django.contrib.auth import logout
-
-import logging
-
-logger = logging.getLogger(__name__)
+# --- Authentication Views ---
+# Note: Django Auth still requires a small SQL DB (SQLite) by default.
+# We will keep these as is to maintain functionality without complex Auth refactoring.
 
 @csrf_exempt
 def superuser_login(request):
     if request.method == "POST":
         username = request.POST.get("username")
         password = request.POST.get("password")
-
         user = authenticate(username=username, password=password)
-
-        if user is not None and user.is_superuser:  
-            login(request, user)  
-            return redirect("upload_certificate") 
-        return render(request, "index.html", {"error": "Invalid credentials or not authorized."})
-
-    return render(request, "index.html") 
+        if user is not None and user.is_superuser:
+            login(request, user)
+            return redirect("upload_certificate")
+        return render(request, "index.html", {"error": "Invalid credentials."})
+    return render(request, "index.html")
 
 @csrf_exempt
 def user_logout(request):
     logout(request)
     return redirect("login")
-@csrf_exempt
-@login_required
+
+# --- Certificate Logic (Firebase Firestore + Storage) ---
+
+@csrf_exempt 
 def upload_certificate(request):
     if request.method == 'POST':
         form = CertificateUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            certificate = form.save(commit=False)
-             
-            certificate.name = str(uuid.uuid4())  
-
             uploaded_file = request.FILES['document']
+            
+            # 1. Generate IDs and Filenames
+            cert_uuid = str(uuid.uuid4())
             ext = uploaded_file.name.split('.')[-1]
-            new_filename = f"{uuid.uuid4()}.{ext}"
+            raw_filename = f"{cert_uuid}_raw.{ext}"
+            final_pdf_name = f"{cert_uuid}.pdf"
+            qr_filename = f"{cert_uuid}_qr.png"
 
-            client = storage.Client()
-            bucket = client.get_bucket(settings.GS_BUCKET_NAME)
+            # 2. Upload Original File to Firebase Storage
+            blob = bucket.blob(raw_filename)
+            blob.upload_from_file(uploaded_file, content_type='application/pdf')
+            blob.make_public()
+            raw_file_url = blob.public_url
 
-            blob = bucket.blob(new_filename)
-            blob.upload_from_file(uploaded_file)
-
-            certificate.document = blob.public_url 
-            link = request.build_absolute_uri(reverse('view_certificate', args=[certificate.name]))
+            # 3. Generate QR Code
+            # Create a link to the view_certificate view
+            link = request.build_absolute_uri(reverse('view_certificate', args=[cert_uuid]))
+            
             qr = qrcode.make(link)
             qr_io = BytesIO()
             qr.save(qr_io, format="PNG")
-            qr_content = ContentFile(qr_io.getvalue(), f"{uuid.uuid4()}.png")
+            qr_io.seek(0)
+            
+            # Upload QR to Storage
+            qr_blob = bucket.blob(qr_filename)
+            qr_blob.upload_from_file(qr_io, content_type='image/png')
+            qr_blob.make_public()
+            qr_code_url = qr_blob.public_url
 
-            qr_code_filename = f"{uuid.uuid4()}.png"
-            qr_blob = bucket.blob(qr_code_filename)
-            qr_blob.upload_from_file(qr_content)
+            # 4. Modify PDF (Add QR Code)
+            # We pass the blob objects directly to the helper function
+            create_pdf_with_qrcode(blob, qr_io, final_pdf_name)
+            
+            # Get the public URL of the final PDF
+            final_pdf_blob = bucket.blob(final_pdf_name)
+            final_pdf_blob.make_public()
+            final_document_url = final_pdf_blob.public_url
 
-            certificate.qr_code = qr_blob.public_url
+            # 5. Save Metadata to Firestore (Replaces Django Models)
+            doc_ref = db.collection('certificates').document(cert_uuid)
+            doc_ref.set({
+                'id': cert_uuid,
+                'name': cert_uuid,
+                'document_url': final_document_url,
+                'qr_code_url': qr_code_url,
+                'created_at': datetime.datetime.now(),
+                'original_filename': uploaded_file.name
+            })
 
-            uploaded_pdf_path = blob.public_url
-            qr_code_image_path = qr_blob.public_url
-
-            new_pdf_name = f"{uuid.uuid4()}.pdf"
-            create_pdf_with_qrcode(uploaded_pdf_path, qr_code_image_path, new_pdf_name)
-
-            certificate.document = new_pdf_name
-            certificate.save()
-
-            certificates = Certificate.objects.all()
-
-            return render(request, 'upload.html', {'form': form, 'link': link, 'certificates': certificates})
+            # 6. Fetch all certificates for the list
+            certificates = get_all_certificates()
+            
+            return render(request, 'upload.html', {
+                'form': form, 
+                'link': link, 
+                'certificates': certificates
+            })
     else:
         form = CertificateUploadForm()
 
-    certificates = Certificate.objects.all()
+    certificates = get_all_certificates()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
 
-def create_pdf_with_qrcode(pdf_path, qr_image_path, new_pdf_path): 
+def get_all_certificates():
+    """Helper to fetch all certs from Firestore for the template"""
+    docs = db.collection('certificates').order_by('created_at', direction=firestore.Query.DESCENDING).stream()
+    cert_list = []
+    for doc in docs:
+        cert_list.append(doc.to_dict())
+    return cert_list
+
+def create_pdf_with_qrcode(original_blob, qr_image_io, new_pdf_filename): 
+    """
+    Downloads original PDF from Storage, stamps QR, uploads new PDF.
+    """
+    # Create the QR stamp PDF in memory
     packet = BytesIO()
     c = canvas.Canvas(packet, pagesize=letter)
-
+    
+    # Calculate position (Top Right)
     page_width = letter[0]
-    page_height = letter[1]
     qr_size = 65
     x_position = ((page_width - 9) - qr_size) / 2
     y_position = 50
 
-    c.drawImage(qr_image_path, x_position, y_position, width=qr_size, height=qr_size)
+    # Draw the QR image from the in-memory BytesIO object
+    # We need to create a temporary file for ReportLab to read the image
+    # or stick to drawing it if reportlab supports the stream directly (usually requires file path)
+    # Simplest way: Use a temporary file for the image or ImageReader
+    from reportlab.lib.utils import ImageReader
+    qr_image_io.seek(0)
+    image = ImageReader(qr_image_io)
+    
+    c.drawImage(image, x_position, y_position, width=qr_size, height=qr_size)
     c.save()
 
     packet.seek(0)
-    new_pdf = PdfReader(packet)
+    new_pdf_layer = PdfReader(packet)
  
-    client = storage.Client()
-    bucket = client.get_bucket(settings.GS_BUCKET_NAME)
- 
-    blob = bucket.blob(pdf_path.split('/')[-1])   
-    pdf_bytes = blob.download_as_bytes() 
-
-    
-    existing_pdf_file = BytesIO(pdf_bytes)
-    existing_pdf = PdfReader(existing_pdf_file)
-
+    # Download existing PDF bytes from Firebase
+    pdf_bytes = original_blob.download_as_bytes()
+    existing_pdf = PdfReader(BytesIO(pdf_bytes))
     output_pdf = PdfWriter()
 
+    # Merge (assuming 1 page, or merging on the first page)
     page = existing_pdf.pages[0]
-    page.merge_page(new_pdf.pages[0])
-
+    page.merge_page(new_pdf_layer.pages[0])
     output_pdf.add_page(page)
+    
+    # If there are more pages, add them
+    for i in range(1, len(existing_pdf.pages)):
+        output_pdf.add_page(existing_pdf.pages[i])
  
-    new_pdf_blob = bucket.blob(new_pdf_path)
-    with new_pdf_blob.open("wb") as f:
-        output_pdf.write(f)
-        
-        
-from django.http import HttpResponse, Http404
-from google.cloud import storage
-from django.conf import settings
-from django.shortcuts import get_object_or_404
-from .models import Certificate
+    # Write final PDF to BytesIO
+    final_pdf_io = BytesIO()
+    output_pdf.write(final_pdf_io)
+    final_pdf_io.seek(0)
+
+    # Upload result to Firebase
+    new_pdf_blob = bucket.blob(new_pdf_filename)
+    new_pdf_blob.upload_from_file(final_pdf_io, content_type='application/pdf')
 
 def view_certificate(request, certificate_name):
-    try: 
-        ceertificate_name = certificate_name.rstrip('.pdf')
-        certificate = get_object_or_404(Certificate, name=certificate_name)
- 
-        file_url = certificate.document.url   
-        file_name = file_url.split("/")[-1] 
-        client = storage.Client()
-        bucket = client.bucket(settings.GS_BUCKET_NAME)
-        blob = bucket.blob(file_name) 
+    try:
+        # Clean the name input
+        cert_id = certificate_name.replace('.pdf', '')
+        
+        # Fetch Metadata from Firestore
+        doc_ref = db.collection('certificates').document(cert_id)
+        doc = doc_ref.get()
+
+        if not doc.exists:
+            raise Http404("Certificate metadata not found.")
+        
+        # We know the filename convention is {id}.pdf based on upload logic
+        filename = f"{cert_id}.pdf"
+        blob = bucket.blob(filename)
 
         if not blob.exists():
-            raise Http404("Certificate not found in storage.") 
-        file_bytes = blob.download_as_bytes() 
-        response = HttpResponse(file_bytes, content_type="application/pdf")
+            raise Http404("Certificate PDF file not found in storage.")
+            
+        file_bytes = blob.download_as_bytes()
         
-        response["Content-Disposition"] = f'inline; filename="{ceertificate_name}.pdf"'
+        response = HttpResponse(file_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{filename}"'
         return response
 
-    except Exception as e: 
+    except Exception as e:
         raise Http404(f"An error occurred: {e}")
