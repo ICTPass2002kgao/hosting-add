@@ -44,13 +44,17 @@ def user_logout(request):
 # --- Certificate Logic (Firebase Firestore + Storage) ---
 
 @csrf_exempt 
+@login_required
 def upload_certificate(request):
     if request.method == 'POST':
         form = CertificateUploadForm(request.POST, request.FILES)
         if form.is_valid():
             uploaded_file = request.FILES['document']
             
-            # 1. Generate IDs and Filenames
+            # Check which button was pressed
+            action_type = request.POST.get('action', 'add_qr') # Default to 'add_qr'
+
+            # 1. Generate IDs
             cert_uuid = str(uuid.uuid4())
             ext = uploaded_file.name.split('.')[-1]
             raw_filename = f"{cert_uuid}_raw.{ext}"
@@ -63,8 +67,7 @@ def upload_certificate(request):
             blob.make_public()
             raw_file_url = blob.public_url
 
-            # 3. Generate QR Code
-            # Create a link to the view_certificate view
+            # 3. Generate QR Code Image (We still create the Code for the DB record)
             link = request.build_absolute_uri(reverse('view_certificate', args=[cert_uuid]))
             
             qr = qrcode.make(link)
@@ -72,22 +75,36 @@ def upload_certificate(request):
             qr.save(qr_io, format="PNG")
             qr_io.seek(0)
             
-            # Upload QR to Storage
             qr_blob = bucket.blob(qr_filename)
             qr_blob.upload_from_file(qr_io, content_type='image/png')
             qr_blob.make_public()
             qr_code_url = qr_blob.public_url
 
-            # 4. Modify PDF (Add QR Code)
-            # We pass the blob objects directly to the helper function
-            create_pdf_with_qrcode(blob, qr_io, final_pdf_name)
-            
-            # Get the public URL of the final PDF
-            final_pdf_blob = bucket.blob(final_pdf_name)
-            final_pdf_blob.make_public()
-            final_document_url = final_pdf_blob.public_url
+            # 4. LOGIC SPLIT: Check Action Type
+            final_document_url = ""
 
-            # 5. Save Metadata to Firestore (Replaces Django Models)
+            if action_type == 'add_qr':
+                # --- OPTION A: STAMP THE QR CODE ---
+                # We pass the blob objects directly to the helper function
+                create_pdf_with_qrcode(blob, qr_io, final_pdf_name)
+                
+                final_pdf_blob = bucket.blob(final_pdf_name)
+                final_pdf_blob.make_public()
+                final_document_url = final_pdf_blob.public_url
+            else:
+                # --- OPTION B: DO NOT STAMP QR CODE ---
+                # We simply use the raw file URL as the final document
+                # Or, to keep naming consistent, we might want to copy the raw blob to the final name
+                # For efficiency, we will just copy the raw blob content to the final name
+                
+                new_blob = bucket.blob(final_pdf_name)
+                # Re-upload the original file to the final name location
+                uploaded_file.seek(0) # Reset file pointer
+                new_blob.upload_from_file(uploaded_file, content_type='application/pdf')
+                new_blob.make_public()
+                final_document_url = new_blob.public_url
+
+            # 5. Save Metadata
             doc_ref = db.collection('certificates').document(cert_uuid)
             doc_ref.set({
                 'id': cert_uuid,
@@ -95,10 +112,10 @@ def upload_certificate(request):
                 'document_url': final_document_url,
                 'qr_code_url': qr_code_url,
                 'created_at': datetime.datetime.now(),
-                'original_filename': uploaded_file.name
+                'original_filename': uploaded_file.name,
+                'has_stamped_qr': (action_type == 'add_qr') # Useful for tracking
             })
 
-            # 6. Fetch all certificates for the list
             certificates = get_all_certificates()
             
             return render(request, 'upload.html', {
@@ -111,7 +128,6 @@ def upload_certificate(request):
 
     certificates = get_all_certificates()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
-
 def get_all_certificates():
     """Helper to fetch all certs from Firestore for the template"""
     docs = db.collection('certificates').order_by('created_at', direction=firestore.Query.DESCENDING).stream()
