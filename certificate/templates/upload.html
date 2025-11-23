@@ -62,6 +62,13 @@
                 </button>
             </div>
         </form> 
+
+        {% if message %}
+            <div class="alert alert-success mt-3">
+                <strong>Success!</strong> {{ message }}
+            </div>
+        {% endif %}
+
         {% if link %}
             <div class="alert alert-success mt-3">
                 <strong>Certificate uploaded!</strong> Here is your link:
@@ -74,20 +81,20 @@
                 </div>
             </div>
         {% endif %}
+
         <h2 class="text-dark">Uploaded Certificates</h2>
         <div class="table-responsive">
             <table class="table table-bordered table-striped">
                 <thead class="thead-dark">
                     <tr>
-                        <th>Name</th>  
+                        <th>File Name</th>  
                         <th>Action</th>
-
                     </tr>
                 </thead>
                 <tbody>
                     {% for certificate in certificates %}
                         <tr> 
-                            <td>{{ certificate.name }}</td>
+                            <td>{{ certificate.original_filename|default:certificate.name }}</td>
                             <td>
                                 <a href="{% url 'view_certificate' certificate.name %}" target="_blank" class="btn btn-link text-primary">View Certificate</a>
                             </td>

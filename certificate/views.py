@@ -42,85 +42,97 @@ def user_logout(request):
     return redirect("login")
 
 # --- Certificate Logic (Firebase Firestore + Storage) ---
-
 @csrf_exempt 
 @login_required
 def upload_certificate(request):
     if request.method == 'POST':
         form = CertificateUploadForm(request.POST, request.FILES)
         if form.is_valid():
-            uploaded_file = request.FILES['document']
+            # CHANGE 1: Get list of all files
+            files = request.FILES.getlist('document') 
+            action_type = request.POST.get('action', 'add_qr')
             
-            # Check which button was pressed
-            action_type = request.POST.get('action', 'add_qr') # Default to 'add_qr'
-
-            # 1. Generate IDs
-            cert_uuid = str(uuid.uuid4())
-            ext = uploaded_file.name.split('.')[-1]
-            raw_filename = f"{cert_uuid}_raw.{ext}"
-            final_pdf_name = f"{cert_uuid}.pdf"
-            qr_filename = f"{cert_uuid}_qr.png"
-
-            # 2. Upload Original File to Firebase Storage
-            blob = bucket.blob(raw_filename)
-            blob.upload_from_file(uploaded_file, content_type='application/pdf')
-            blob.make_public()
-            raw_file_url = blob.public_url
-
-            # 3. Generate QR Code Image (We still create the Code for the DB record)
-            link = request.build_absolute_uri(reverse('view_certificate', args=[cert_uuid]))
+            uploaded_count = 0
             
-            qr = qrcode.make(link)
-            qr_io = BytesIO()
-            qr.save(qr_io, format="PNG")
-            qr_io.seek(0)
-            
-            qr_blob = bucket.blob(qr_filename)
-            qr_blob.upload_from_file(qr_io, content_type='image/png')
-            qr_blob.make_public()
-            qr_code_url = qr_blob.public_url
-
-            # 4. LOGIC SPLIT: Check Action Type
-            final_document_url = ""
-
-            if action_type == 'add_qr':
-                # --- OPTION A: STAMP THE QR CODE ---
-                # We pass the blob objects directly to the helper function
-                create_pdf_with_qrcode(blob, qr_io, final_pdf_name)
+            # CHANGE 2: Loop through every file in the list
+            for uploaded_file in files:
                 
-                final_pdf_blob = bucket.blob(final_pdf_name)
-                final_pdf_blob.make_public()
-                final_document_url = final_pdf_blob.public_url
-            else:
-                # --- OPTION B: DO NOT STAMP QR CODE ---
-                # We simply use the raw file URL as the final document
-                # Or, to keep naming consistent, we might want to copy the raw blob to the final name
-                # For efficiency, we will just copy the raw blob content to the final name
+                # --- START PER-FILE LOGIC ---
                 
-                new_blob = bucket.blob(final_pdf_name)
-                # Re-upload the original file to the final name location
-                uploaded_file.seek(0) # Reset file pointer
-                new_blob.upload_from_file(uploaded_file, content_type='application/pdf')
-                new_blob.make_public()
-                final_document_url = new_blob.public_url
+                # 1. Generate IDs
+                cert_uuid = str(uuid.uuid4())
+                
+                # 2. Upload Raw (Optional backup)
+                # Note: If you want to save time/space for 220 files, you can skip this raw upload 
+                # if you are doing Option B, but we will keep it for safety.
+                raw_filename = f"{cert_uuid}_raw_{uploaded_file.name}" 
+                blob = bucket.blob(raw_filename)
+                blob.upload_from_file(uploaded_file, content_type='application/pdf')
+                blob.make_public()
+                uploaded_file.seek(0) 
 
-            # 5. Save Metadata
-            doc_ref = db.collection('certificates').document(cert_uuid)
-            doc_ref.set({
-                'id': cert_uuid,
-                'name': cert_uuid,
-                'document_url': final_document_url,
-                'qr_code_url': qr_code_url,
-                'created_at': datetime.datetime.now(),
-                'original_filename': uploaded_file.name,
-                'has_stamped_qr': (action_type == 'add_qr') # Useful for tracking
-            })
+                # 3. Generate QR Code
+                link = request.build_absolute_uri(reverse('view_certificate', args=[cert_uuid]))
+                qr = qrcode.make(link)
+                qr_io = BytesIO()
+                qr.save(qr_io, format="PNG")
+                qr_io.seek(0)
+                
+                qr_filename = f"{cert_uuid}_qr.png"
+                qr_blob = bucket.blob(qr_filename)
+                qr_blob.upload_from_file(qr_io, content_type='image/png')
+                qr_blob.make_public()
+                qr_code_url = qr_blob.public_url
 
+                # 4. Logic Split (With QR vs Original Name)
+                final_document_url = ""
+                final_storage_name = "" 
+
+                if action_type == 'add_qr':
+                    # --- OPTION A: STAMP QR ---
+                    final_pdf_name = f"{cert_uuid}.pdf"
+                    
+                    create_pdf_with_qrcode(blob, qr_io, final_pdf_name)
+                    
+                    final_pdf_blob = bucket.blob(final_pdf_name)
+                    final_pdf_blob.make_public()
+                    final_document_url = final_pdf_blob.public_url
+                    final_storage_name = final_pdf_name
+
+                else:
+                    # --- OPTION B: ORIGINAL NAME ---
+                    # WARNING: If you upload 2 files with the exact same name in this batch, 
+                    # the second one will overwrite the first one in storage!
+                    final_pdf_name = uploaded_file.name 
+                    
+                    new_blob = bucket.blob(final_pdf_name)
+                    new_blob.upload_from_file(uploaded_file, content_type='application/pdf')
+                    new_blob.make_public()
+                    final_document_url = new_blob.public_url
+                    final_storage_name = final_pdf_name
+
+                # 5. Save Metadata
+                doc_ref = db.collection('certificates').document(cert_uuid)
+                doc_ref.set({
+                    'id': cert_uuid,
+                    'name': cert_uuid,
+                    'document_url': final_document_url,
+                    'qr_code_url': qr_code_url,
+                    'created_at': datetime.datetime.now(),
+                    'original_filename': uploaded_file.name,
+                    'storage_filename': final_storage_name,
+                    'has_stamped_qr': (action_type == 'add_qr')
+                })
+                
+                uploaded_count += 1
+                # --- END PER-FILE LOGIC ---
+
+            # Fetch list after all uploads are done
             certificates = get_all_certificates()
             
             return render(request, 'upload.html', {
                 'form': form, 
-                'link': link, 
+                'message': f"Successfully uploaded {uploaded_count} certificates!", 
                 'certificates': certificates
             })
     else:
@@ -128,6 +140,7 @@ def upload_certificate(request):
 
     certificates = get_all_certificates()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
+
 def get_all_certificates():
     """Helper to fetch all certs from Firestore for the template"""
     docs = db.collection('certificates').order_by('created_at', direction=firestore.Query.DESCENDING).stream()
