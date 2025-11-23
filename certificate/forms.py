@@ -1,7 +1,12 @@
 from django import forms
 
+# 1. Custom widget to bypass Django 5+ strict checks
+class MultipleFileInput(forms.ClearableFileInput):
+    allow_multiple_selected = True
+
 class CertificateUploadForm(forms.Form):
-    # We only need the file input; metadata is generated in the view
+    # 2. Apply the custom widget
     document = forms.FileField(
-        widget=forms.ClearableFileInput(attrs={'multiple': True})
+        widget=MultipleFileInput(attrs={'class': 'form-control', 'multiple': True}),
+        label="Select Certificates (Select multiple files)"
     )

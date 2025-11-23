@@ -7,32 +7,15 @@
     <title>Upload Certificate</title>
     <link href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" rel="stylesheet">
     <style>
-        body {
-            background-color: #f8f9fa;
-        }
-        .container {
-            max-width: 800px;
-            margin-top: 50px;
-        }
-        .btn-primary {
-            background-color: #007bff;
-            border-color: #007bff;
-        }
-        .btn-primary:hover {
-            background-color: #0056b3;
-            border-color: #0056b3;
-        }
-        table {
-            margin-top: 20px;
-        }
+        body { background-color: #f8f9fa; }
+        .container { max-width: 800px; margin-top: 50px; }
+        .btn-primary { background-color: #007bff; border-color: #007bff; }
+        .table-responsive { max-height: 500px; overflow-y: auto; }
     </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
         <a class="navbar-brand" href="#">Upload Portal</a>
-        <button class="navbar-toggler" type="button" data-toggle="collapse" data-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
-            <span class="navbar-toggler-icon"></span>
-        </button>
         <div class="collapse navbar-collapse" id="navbarNav">
             <ul class="navbar-nav ml-auto">
                 <li class="nav-item">
@@ -44,6 +27,7 @@
             </ul>
         </div>
     </nav>
+
 <div class="container">
     <h2 class="text-primary">Upload Certificate</h2>
     <div class="card shadow-sm p-4 mb-4 bg-white rounded">
@@ -58,37 +42,24 @@
                 </button>
 
                 <button type="submit" name="action" value="no_qr" class="btn btn-outline-secondary">
-                    Upload Without QR
+                    Upload Without QR (Keep Original Name)
                 </button>
             </div>
         </form> 
 
         {% if message %}
             <div class="alert alert-success mt-3">
-                <strong>Success!</strong> {{ message }}
+                <strong>{{ message }}</strong>
             </div>
         {% endif %}
 
-        {% if link %}
-            <div class="alert alert-success mt-3">
-                <strong>Certificate uploaded!</strong> Here is your link:
-                <p><a href="{{ link }}" target="_blank">{{ link }}</a></p>
-                <div class="input-group mb-3">
-                    <input type="text" class="form-control" value="{{ link }}" id="certificateLink" readonly>
-                    <div class="input-group-append">
-                        <button class="btn btn-secondary" onclick="copyLink('{{ link }}')">Copy Link</button>
-                    </div>
-                </div>
-            </div>
-        {% endif %}
-
-        <h2 class="text-dark">Uploaded Certificates</h2>
+        <h2 class="text-dark mt-4">Recent Uploads</h2>
         <div class="table-responsive">
             <table class="table table-bordered table-striped">
                 <thead class="thead-dark">
                     <tr>
-                        <th>File Name</th>  
-                        <th>Action</th>
+                        <th>Original Filename</th>  
+                        <th>View</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -96,12 +67,12 @@
                         <tr> 
                             <td>{{ certificate.original_filename|default:certificate.name }}</td>
                             <td>
-                                <a href="{% url 'view_certificate' certificate.name %}" target="_blank" class="btn btn-link text-primary">View Certificate</a>
+                                <a href="{% url 'view_certificate' certificate.name %}" target="_blank" class="btn btn-sm btn-info">View</a>
                             </td>
                         </tr>
                     {% empty %}
                         <tr>
-                            <td colspan="2" class="text-center">No certificates uploaded yet.</td>
+                            <td colspan="2" class="text-center">No certificates found.</td>
                         </tr>
                     {% endfor %}
                 </tbody>
@@ -111,20 +82,6 @@
 </div>
 
 <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/popper.js@1.16.1/dist/umd/popper.min.js"></script>
 <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
-
-<script>
-    function copyLink(link) {
-        const tempInput = document.createElement("input");
-        document.body.appendChild(tempInput);
-        tempInput.value = link;
-        tempInput.select();
-        document.execCommand("copy");
-        document.body.removeChild(tempInput);
-        alert("Link copied: " + link);
-    }
-</script>
-
 </body>
 </html>

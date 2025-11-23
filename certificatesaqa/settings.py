@@ -143,7 +143,7 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 DEFAULT_FILE_STORAGE = 'storages.backends.gcloud.GoogleCloudStorage'
 GS_BUCKET_NAME = 'certificate_bucket'
 GS_PROJECT_ID = 'certificate-442017'
-
+DATA_UPLOAD_MAX_NUMBER_FILES = 188
 # Set the media URL for accessing files
 MEDIA_URL = f'https://storage.googleapis.com/{GS_BUCKET_NAME}/'
 
