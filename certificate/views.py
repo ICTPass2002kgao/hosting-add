@@ -181,7 +181,62 @@ def upload_certificate(request):
     form = CertificateUploadForm()
     certificates = get_all_certificates()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
+
 def view_certificate(request, certificate_name):
+    try:
+        # Clean input (remove trailing slashes if any)
+        lookup_value = certificate_name.strip()
+        
+        final_filename = None
+        
+        # STRATEGY 1: Check if 'lookup_value' is a Document ID in Firestore
+        # (This handles the case where the URL is a UUID like '40f65fc3-...')
+        doc_ref = db.collection('certificates').document(lookup_value)
+        doc = doc_ref.get()
+
+        if doc.exists:
+            data = doc.to_dict()
+            # Use the saved filename. If missing (old data), fallback to ID + .pdf
+            final_filename = data.get('storage_filename', f"{lookup_value}.pdf")
+            
+        else:
+            # STRATEGY 2: It's not an ID, maybe it IS the filename?
+            # (This handles the case where URL is 'MyFile.pdf')
+            
+            # Check if we have a record with this storage_filename
+            query = db.collection('certificates').where('storage_filename', '==', lookup_value).limit(1).stream()
+            found_doc = next(query, None)
+            
+            if found_doc:
+                final_filename = found_doc.to_dict().get('storage_filename')
+            else:
+                # STRATEGY 3: Fallback for raw files manually uploaded
+                # If the user typed "file", try "file" then "file.pdf"
+                final_filename = lookup_value
+
+        # --- DOWNLOAD LOGIC ---
+        
+        # Attempt 1: Try exact filename found
+        blob = bucket.blob(final_filename)
+        if not blob.exists():
+            # Attempt 2: If failed, maybe we need to add .pdf?
+            if not final_filename.lower().endswith('.pdf'):
+                 blob = bucket.blob(f"{final_filename}.pdf")
+                 # Update name for the download header
+                 final_filename = f"{final_filename}.pdf" 
+
+        if not blob.exists():
+            raise Http404(f"File '{final_filename}' not found in storage.")
+            
+        file_bytes = blob.download_as_bytes()
+        
+        response = HttpResponse(file_bytes, content_type="application/pdf")
+        response["Content-Disposition"] = f'inline; filename="{final_filename}"'
+        return response
+
+    except Exception as e:
+        print(f"Error viewing certificate: {e}")
+        raise Http404(f"An error occurred: {e}")
     try:
         # 1. Do NOT strip the extension. We need 'file.pdf', not 'file'
         target_filename = certificate_name 
