@@ -181,36 +181,44 @@ def upload_certificate(request):
     form = CertificateUploadForm()
     certificates = get_all_certificates()
     return render(request, 'upload.html', {'form': form, 'certificates': certificates})
-
 def view_certificate(request, certificate_name):
     try:
-        # Clean ID
-        cert_id = certificate_name.replace('.pdf', '')
+        # 1. Do NOT strip the extension. We need 'file.pdf', not 'file'
+        target_filename = certificate_name 
         
-        # 1. Fetch Metadata
-        doc_ref = db.collection('certificates').document(cert_id)
-        doc = doc_ref.get()
-
-        if not doc.exists:
-            raise Http404("Certificate metadata not found.")
+        # 2. Query Firestore for a document where 'storage_filename' matches
+        # We use .limit(1) because standard queries return a list
+        query = db.collection('certificates').where('storage_filename', '==', target_filename).limit(1).stream()
         
-        data = doc.to_dict()
+        found_doc = None
+        for doc in query:
+            found_doc = doc.to_dict()
+            break
+            
+        # 3. Determine the file to fetch
+        final_filename = ""
+        
+        if found_doc:
+            # If found in DB, use the trusted name from DB
+            final_filename = found_doc.get('storage_filename')
+        else:
+            # Fallback: If not in DB, try to look for the file directly in storage
+            # This is useful if you uploaded files manually to Firebase Console
+            final_filename = target_filename
 
-        # 2. Get the ACTUAL filename from the DB
-        # If 'storage_filename' is missing (old records), fallback to cert_id.pdf
-        filename = data.get('storage_filename', f"{cert_id}.pdf")
+        # 4. Check Storage
+        blob = bucket.blob(final_filename)
 
-        # 3. Download from Storage
-        blob = bucket.blob(filename)
         if not blob.exists():
-            raise Http404(f"File {filename} not found in storage.")
+            raise Http404(f"File '{final_filename}' not found in storage.")
             
         file_bytes = blob.download_as_bytes()
         
         response = HttpResponse(file_bytes, content_type="application/pdf")
-        response["Content-Disposition"] = f'inline; filename="{filename}"'
+        # content-disposition inline allows the browser to open it
+        response["Content-Disposition"] = f'inline; filename="{final_filename}"'
         return response
 
     except Exception as e:
-        print(e)
+        print(f"Error viewing certificate: {e}")
         raise Http404(f"An error occurred: {e}")
